@@ -1,0 +1,267 @@
+---
+create_research_plan:
+  description: "Analyze the research topic \"{research_topic}\" and the primary research
+    question \"{research_question}\" to produce a structured research plan. \n\nYour
+    output must include:\n\n1. **Research Scope**: Concise definition of what is in
+    scope and out of scope for this review.\n2. **Primary Keywords**: A list of 10–20
+    domain-specific keywords and synonyms (include both full terms and abbreviations).\n3.
+    **Boolean Search Queries**: At least 5 distinct Boolean queries ready to submit
+    to academic databases (arXiv, Semantic Scholar, OpenAlex). Format each query as
+    a string.\n4. **Semantic Scholar API Queries**: Formatted query strings for https://api.semanticscholar.org/graph/v1/paper/search\n5.
+    **OpenAlex API Queries**: Formatted query strings for https://api.openalex.org/works\n6.
+    **Inclusion Criteria**: Explicit list (e.g., peer-reviewed, within year range
+    {year_from}–{year_to}, in discipline \"{disciplines}\", English language).\n7.
+    **Exclusion Criteria**: Explicit list (e.g., non-peer-reviewed opinion pieces,
+    papers without abstracts, out-of-scope domains).\n8. **Relevance Threshold**:
+    Minimum relevance score (0–100) a paper must achieve to be included.\n9. **Paper
+    Limit**: Target {max_papers} papers maximum.\n10. **Expected Challenges**: Known
+    difficulties in searching this topic and mitigation strategies."
+  expected_output: A structured research plan document in markdown format containing
+    all 10 sections above. The Boolean queries must be syntactically valid and directly
+    usable. Inclusion and exclusion criteria must be specific enough for another agent
+    to apply them consistently without ambiguity.
+  agent: research_planner
+search_academic_sources:
+  description: |-
+    Using the research plan from the previous task, execute searches across multiple academic databases to retrieve real candidate papers on "{research_topic}".
+
+    **Step 1 — arXiv Search:**
+    Use the ArxivPaperTool to execute the Boolean queries from the research plan. Retrieve papers published between {year_from} and {year_to}.
+
+    **Step 2 — Semantic Scholar Search:**
+    Use the ExaSearchTool to search: site:api.semanticscholar.org OR site:semanticscholar.org for the research topic. Also search Semantic Scholar directly at: https://api.semanticscholar.org/graph/v1/paper/search?query={research_topic}&fields=title,authors,year,abstract,externalIds,citationCount,openAccessPdf,venue
+
+    **Step 3 — OpenAlex Search:**
+    Use the ExaSearchTool to fetch from: https://api.openalex.org/works?search={research_topic}&filter=publication_year:{year_from}-{year_to}&per_page=25
+
+    **Step 4 — Deduplication:**
+    Deduplicate all collected papers. Primary deduplication key: DOI (if available). Secondary: normalized title + first author surname + year. Keep track of all source databases a paper appeared in.
+
+    **Step 5 — Provenance Record:**
+    For every paper, record: title, authors, year, abstract (or note if missing), DOI or URL, venue/journal, citation count (if available), source database(s), and the query that retrieved it.
+
+    Do not fabricate any paper. If a source fails or returns no results, report it explicitly.
+  expected_output: 'A structured list of up to {max_papers} unique candidate papers,
+    each containing: title, authors (list), publication year, abstract (or "ABSTRACT_MISSING"),
+    DOI or canonical URL, venue, citation count (or "UNKNOWN"), source database(s),
+    retrieval query, and open-access URL if known. Followed by a search provenance
+    summary: which databases were queried, how many results each returned, how many
+    duplicates were removed, and any sources that failed or returned zero results.'
+  agent: academic_search_agent
+  context:
+  - create_research_plan
+screen_and_score_papers:
+  description: "Apply the inclusion and exclusion criteria from the research plan
+    to every candidate paper retrieved in the search task. Screen each paper against
+    the research question \"{research_question}\".\n\n**For each paper, perform:**\n\n1.
+    **Year Filter**: Is the publication year between {year_from} and {year_to}? If
+    not → EXCLUDED (year out of range).\n2. **Domain Filter**: Does the paper's topic/venue
+    fall within \"{disciplines}\"? If clearly not → EXCLUDED (out of scope domain).\n3.
+    **Abstract Availability**: Is an abstract available? If not → NEEDS_REVIEW (insufficient
+    metadata).\n4. **Relevance Scoring (0–100)**: Score the paper based on how directly
+    it addresses \"{research_question}\". Consider: keyword overlap, methodological
+    alignment, problem statement match, and contribution type.\n5. **Screening Decision**:
+    \n   - Score ≥ relevance threshold → INCLUDED\n   - Score < relevance threshold
+    → EXCLUDED (low relevance)\n   - Ambiguous abstract or borderline score → NEEDS_REVIEW\n6.
+    **Justification**: Write 2–4 sentences explaining the decision, citing specific
+    evidence from the title/abstract.\n\nIf the paper's source URL is accessible,
+    use URLReadTool to fetch additional metadata before scoring.\n\nNever include
+    a paper without a documented justification. Never fabricate abstract content to
+    improve a score."
+  expected_output: 'A screening report containing: (1) A table with one row per paper
+    showing: Paper ID, Title, Year, Source, Relevance Score (0–100), Screening Decision
+    (INCLUDED/EXCLUDED/NEEDS_REVIEW), and Justification. (2) A summary: total candidate
+    papers, total INCLUDED, total EXCLUDED (with breakdown by exclusion reason), total
+    NEEDS_REVIEW. (3) The final list of INCLUDED papers with their titles, authors,
+    years, DOIs/URLs, and relevance scores — these are the papers that will proceed
+    to analysis.'
+  agent: screening_and_relevance_agent
+  context:
+  - create_research_plan
+  - search_academic_sources
+analyze_included_papers:
+  description: |-
+    For each INCLUDED paper from the screening task, produce a structured analysis. If the paper has an accessible URL or DOI, use URLReadTool to retrieve and read its full text or abstract page before analyzing.
+
+    **Extract and structure the following for each paper:**
+
+    - **Paper ID & Citation Key**: (Author, Year) format
+    - **Analysis Scope**: FULL_TEXT / ABSTRACT_BASED / METADATA_ONLY — based on what content was actually available
+    - **Research Problem**: What problem does the paper address?
+    - **Research Objectives**: What does the paper aim to achieve? [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Research Questions**: Specific questions the paper investigates. [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Methodology**: Research design and approach (experimental, survey, theoretical, etc.) [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Algorithms / Techniques**: Specific methods, models, or algorithms used. [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Dataset / Sample**: Data used, size, source, domain. [EXPLICITLY_STATED / NOT_AVAILABLE]
+    - **Evaluation Metrics**: How results were measured. [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Main Findings**: Key results and conclusions. [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Limitations**: Limitations acknowledged by the authors. [EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE]
+    - **Future Work**: Directions suggested by the authors. [EXPLICITLY_STATED / NOT_AVAILABLE]
+    - **Relevance to Research Question**: How this paper contributes to answering "{research_question}"
+
+    CRITICAL: Never fabricate numerical results, dataset statistics, page references, or experimental outcomes. If information is not available from the source, mark it as NOT_AVAILABLE.
+  expected_output: A structured analysis report for each INCLUDED paper, organized
+    as a numbered list. Each entry includes all 13 analysis fields with their evidence-level
+    labels (EXPLICITLY_STATED / INFERRED / NOT_AVAILABLE / ABSTRACT_BASED). End with
+    a consolidated table showing all papers and their key characteristics for use
+    in the comparative analysis task.
+  agent: paper_analysis_agent
+  context:
+  - screen_and_score_papers
+comparative_analysis_and_matrix:
+  description: "Using the structured paper analyses, produce a comprehensive comparative
+    analysis of all INCLUDED papers.\n\n**Produce the following outputs:**\n\n1. **Comparison
+    Matrix** (markdown table): Rows = papers (Author, Year), Columns = Research Objective
+    | Methodology | Dataset | Key Techniques | Evaluation Metrics | Main Findings
+    | Limitations | Relevance Score. Mark cells as \"N/A\" or \"NOT_AVAILABLE\" where
+    data is genuinely absent — do not invent values.\n\n2. **Thematic Clusters**:
+    Group papers into 3–7 thematic clusters based on shared research focus. Name each
+    cluster and list the papers within it.\n\n3. **Methodological Analysis**: \n   -
+    Which methodologies are most common?\n   - Which are rare or absent?\n   - Are
+    there methodological gaps?\n\n4. **Findings Consistency Analysis**:\n   - Which
+    findings are consistent across multiple papers? (cite each paper)\n   - Which
+    findings conflict? (explain possible reasons for conflict — methodological differences,
+    dataset differences, etc.)\n\n5. **Publication Trend**: Count papers by year.
+    Note whether activity in this area is growing, stable, or declining.\n\n6. **Dataset
+    and Evaluation Diversity**: Summarize the diversity of datasets and metrics used.\n\nIMPORTANT:
+    When findings conflict, do not arbitrarily pick a \"winner.\" Explain what the
+    methodological or contextual differences might account for the divergence."
+  expected_output: 'A comparative analysis report containing: (1) the full comparison
+    matrix as a markdown table, (2) thematic clusters with paper assignments, (3)
+    methodological analysis, (4) findings consistency and conflict analysis with paper
+    citations, (5) year-by-year publication count, and (6) dataset/evaluation diversity
+    summary. All claims must cite specific papers from the corpus by (Author, Year).'
+  agent: comparative_analysis_agent
+  context:
+  - analyze_included_papers
+identify_research_gaps:
+  description: |-
+    Analyze the paper analyses and comparative analysis to identify candidate research gaps within the reviewed corpus.
+
+    **For each proposed gap, provide:**
+
+    1. **Gap Title**: Short descriptive name
+    2. **Gap Type**: Choose from — Methodological Gap | Dataset/Evaluation Gap | Domain/Population Gap | Theoretical Gap | Application Gap | Conflicting-Evidence Gap | Underexplored Topic
+    3. **Detailed Description**: What is missing, underexplored, or unresolved? (3–5 sentences)
+    4. **Supporting Evidence**: Which papers, and what specific content from them, support this gap claim? Cite by (Author, Year).
+    5. **Existing Approaches**: What has been attempted so far (from the corpus)?
+    6. **Why This Gap May Matter**: Potential scientific or practical significance.
+    7. **Suggested Future Research Questions**: 1–3 specific, actionable research questions.
+    8. **Confidence Label**: HIGH (multiple papers explicitly acknowledge this limitation) | MEDIUM (inferred from methodological patterns) | LOW (speculative based on limited evidence)
+    9. **Scope Caveat**: Explicitly state that this gap is identified within the scope of the retrieved corpus ({max_papers} papers) and not across all global scholarship on "{research_topic}".
+
+    **Sources for gap identification:**
+    - Limitations sections of analyzed papers
+    - Recurring methodological weaknesses across the comparison matrix
+    - Underrepresented thematic clusters
+    - Conflicting findings that remain unresolved
+    - Absent datasets, populations, or evaluation settings
+
+    Do not claim global novelty. Do not generate gaps without supporting evidence from the corpus.
+  expected_output: 'A research gaps report containing 3–8 identified candidate gaps,
+    each with all 9 fields populated. Presented as numbered sections. Followed by
+    a summary table: Gap Title | Gap Type | Confidence | Supporting Papers. The report
+    must include a clear disclaimer that these gaps reflect the retrieved corpus and
+    require broader literature validation before claiming novelty.'
+  agent: research_gap_identification_agent
+  context:
+  - analyze_included_papers
+  - comparative_analysis_and_matrix
+synthesize_literature_review:
+  description: |-
+    Write a complete, publication-quality structured literature review on "{research_topic}" using ONLY the papers that were INCLUDED in the screening task and analyzed in subsequent tasks.
+
+    **Required Sections:**
+
+    ## 1. Title
+    A precise academic title for the literature review.
+
+    ## 2. Abstract (250–300 words)
+    Purpose, scope, search strategy summary, number of included papers, key themes, main conclusions.
+
+    ## 3. Introduction
+    Background and motivation. Why is this topic important? What is the state of the field?
+
+    ## 4. Background and Theoretical Foundations
+    Key concepts, definitions, and theoretical frameworks relevant to "{research_topic}".
+
+    ## 5. Search Strategy and Selection
+    - Databases searched
+    - Date range: {year_from}–{year_to}
+    - Total papers retrieved, screened, and included
+    - Inclusion/exclusion criteria applied
+
+    ## 6. Thematic Literature Review
+    Organized by the thematic clusters identified in the comparative analysis. For each theme: synthesize the findings across papers, compare approaches, note agreements and disagreements. Use in-text citations: (Author, Year).
+
+    ## 7. Comparative Analysis Summary
+    Reference the comparison matrix. Highlight key methodological and findings differences.
+
+    ## 8. Research Gaps and Future Directions
+    Incorporate the identified gaps. Frame each as a research opportunity with supporting evidence.
+
+    ## 9. Limitations of This Review
+    Be honest about: search scope, database coverage, abstract-only analyses, language restrictions, publication bias.
+
+    ## 10. Conclusion
+    Key takeaways and the contribution of this review.
+
+    ## 11. References
+    Full bibliography in {citation_style} format for every cited paper. Use only papers from the corpus.
+
+    CRITICAL RULES: (1) Every (Author, Year) citation must refer to a paper in the corpus. (2) Never add papers not retrieved during this research run. (3) Never invent findings, statistics, or quotes. (4) Label any claim based on abstract-only analysis.
+  expected_output: A complete, structured literature review in markdown format with
+    all 11 sections. All in-text citations must use (Author, Year) format and correspond
+    to papers in the included corpus. The References section must list every cited
+    paper with full bibliographic details in {citation_style} format including DOI
+    or URL where available.
+  agent: literature_synthesis_agent
+  context:
+  - screen_and_score_papers
+  - analyze_included_papers
+  - comparative_analysis_and_matrix
+  - identify_research_gaps
+quality_control_and_citation_audit:
+  description: |-
+    Perform a comprehensive quality-control audit of the generated literature review against the full corpus of retrieved, screened, and analyzed papers.
+
+    **Run the following checks and report PASS / WARNING / FAIL for each:**
+
+    ### Citation Integrity Checks
+    - [ ] Every in-text citation (Author, Year) resolves to a paper in the included corpus
+    - [ ] Every paper in the References section was actually cited in the text
+    - [ ] Every INCLUDED paper is cited at least once
+    - [ ] No citation appears in References that was not retrieved during this research run
+    - [ ] DOIs/URLs in References match those recorded during the search phase
+
+    ### Factual Accuracy Checks
+    - [ ] No numerical results are stated without a supporting paper citation
+    - [ ] No dataset names are mentioned without a corresponding analyzed paper
+    - [ ] No quoted text is present (avoid quotes unless text is from an accessible full-text source)
+    - [ ] All abstract-based analyses are labeled as such
+
+    ### Consistency Checks
+    - [ ] Claims in Section 6 (Thematic Review) are consistent with the Comparative Analysis
+    - [ ] Research gaps in Section 8 are consistent with the Identify Research Gaps task output
+    - [ ] No contradictory statements appear between sections
+    - [ ] No claims exceed the evidence available in the corpus
+
+    ### Quality Checks
+    - [ ] No duplicate paragraphs or near-duplicate content
+    - [ ] Review limitations (Section 9) are honestly stated
+    - [ ] Gap claims do not assert global novelty beyond the retrieved corpus
+    - [ ] All NEEDS_REVIEW papers are noted if they were excluded or included with caveats
+
+    **After the audit:** Produce a corrected version of the review with all FAIL and WARNING items resolved. For any claim that cannot be substantiated, either remove it, flag it with [UNVERIFIED], or replace it with a correctly cited equivalent.
+  expected_output: 'Two outputs: (1) A QC Audit Report with a checklist table showing
+    each check with status (PASS/WARNING/FAIL) and a brief explanation. Summary: total
+    checks, pass count, warning count, fail count, overall status (APPROVED / APPROVED_WITH_WARNINGS
+    / REQUIRES_REVISION). (2) The final, audit-clean version of the complete literature
+    review in markdown format with all issues resolved, ready for export. This final
+    review is the primary deliverable of the entire research workflow.'
+  agent: quality_control_and_citation_audit_agent
+  output_file: output/literature_review.md
+  context:
+  - search_academic_sources
+  - screen_and_score_papers
+  - synthesize_literature_review
