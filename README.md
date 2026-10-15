@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # AiResearchAgentAutomatedLiteratureReviews Crew
 
 Welcome to the AiResearchAgentAutomatedLiteratureReviews Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
@@ -49,3 +50,6 @@ For support, questions, or feedback regarding the AiResearchAgentAutomatedLitera
 - [Chat with our docs](https://chatg.pt/DWjSBZn)
 
 Let's create wonders together with the power and simplicity of crewAI.
+=======
+# ai_research_agent___automated_literature_reviews_v1_crewai-project
+>>>>>>> 0ef2380f4a3bf49914ece2fd58dd7645e770a245
